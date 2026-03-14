@@ -1,0 +1,15 @@
+{
+  "name": "arch-v1-edu-server",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Local dev server for Architecture V1 educational doc — serves app and generates TTS audio to disk",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "express": "^4.21.0"
+  }
+}
