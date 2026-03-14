@@ -45,11 +45,11 @@ const CHAPTERS = [
 ];
 
 const VOICES = [
-  { id: "nova", name: "Nova", desc: "Warm, natural female" },
-  { id: "alloy", name: "Alloy", desc: "Balanced, neutral" },
-  { id: "echo", name: "Echo", desc: "Warm male" },
-  { id: "fable", name: "Fable", desc: "Expressive, British" },
-  { id: "marin", name: "Marin", desc: "Smooth, calm" },
+  // { id: "nova", name: "Nova", desc: "Warm, natural female" },
+  // { id: "alloy", name: "Alloy", desc: "Balanced, neutral" },
+  // { id: "echo", name: "Echo", desc: "Warm male" },
+  // { id: "fable", name: "Fable", desc: "Expressive, British" },
+  // { id: "marin", name: "Marin", desc: "Smooth, calm" },
   { id: "cedar", name: "Cedar", desc: "Grounded, rich" },
 ];
 
@@ -85,7 +85,7 @@ export function AudioSetupButton() {
 export function AudioGeneratorModal() {
   const { showGenerator, setShowGenerator, setSections, markSectionAvailable, refreshAvailability, audioReady } = useAudio();
   const [apiKey, setApiKey] = useState("");
-  const [voice, setVoice] = useState("nova");
+  const [voice, setVoice] = useState("cedar");
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, label: "" });
   const [error, setError] = useState("");

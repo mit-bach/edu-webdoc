@@ -191,9 +191,18 @@ export async function clearAllAudio(): Promise<void> {
 
 // ─── Static file loading (for GitHub Pages) ───
 
+// Converts sectionId to subfolder URL path: "ch1_s0" → "/audio/ch1/s0.mp3"
+export function sectionIdToAudioUrl(sectionId: string): string {
+  const sepIdx = sectionId.indexOf("_");
+  if (sepIdx < 0) return `/audio/${sectionId}.mp3`;
+  const chapter = sectionId.slice(0, sepIdx);
+  const section = sectionId.slice(sepIdx + 1);
+  return `/audio/${chapter}/${section}.mp3`;
+}
+
 export async function tryLoadStaticAudio(sectionId: string): Promise<Blob | null> {
   try {
-    const resp = await fetch(`/audio/${sectionId}.mp3`);
+    const resp = await fetch(sectionIdToAudioUrl(sectionId));
     if (resp.ok) return resp.blob();
     return null;
   } catch {

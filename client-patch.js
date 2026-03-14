@@ -71,6 +71,14 @@
     await fetch("/api/audio", { method: "DELETE" });
   }
 
+  // ─── Path helpers ───
+  // Converts sectionId to subfolder URL: "ch1_s0" → "/audio/ch1/s0.mp3"
+  function sectionIdToAudioUrl(sectionId) {
+    var idx = sectionId.indexOf("_");
+    if (idx < 0) return "/audio/" + sectionId + ".mp3";
+    return "/audio/" + sectionId.slice(0, idx) + "/" + sectionId.slice(idx + 1) + ".mp3";
+  }
+
   // ─── Patch the UI ───
   // We observe the DOM for the generator modal and patch it when it appears.
   function patchUI() {
@@ -85,6 +93,51 @@
 
     // Override audio availability check — also look at server files
     overrideAvailabilityCheck();
+
+    // Persist active chapter in URL hash
+    patchChapterPersistence();
+  }
+
+  // ─── Chapter persistence via URL hash ───
+
+  const VALID_CHAPTERS = ["ch1","ch2","ch3","ch4","ch5","ch6","ch7","ch8"];
+
+  function patchChapterPersistence() {
+    const navButtons = document.querySelectorAll("nav button");
+    if (navButtons.length === 0) return;
+
+    // On nav click → update hash
+    navButtons.forEach((btn, idx) => {
+      btn.addEventListener("click", () => {
+        const chId = VALID_CHAPTERS[idx];
+        if (chId) {
+          // Use replaceState to avoid polluting history on every click
+          // (hashchange listener handles back/forward separately)
+          history.replaceState(null, "", "#" + chId);
+        }
+      });
+    });
+
+    // On load → restore from hash
+    restoreChapterFromHash(navButtons);
+
+    // On back/forward → navigate to the hash chapter
+    window.addEventListener("hashchange", () => {
+      restoreChapterFromHash(navButtons);
+    });
+  }
+
+  function restoreChapterFromHash(navButtons) {
+    const hash = location.hash.replace("#", "");
+    const idx = VALID_CHAPTERS.indexOf(hash);
+    if (idx >= 0 && navButtons[idx]) {
+      // Small delay to let React finish mounting on initial load
+      setTimeout(() => {
+        navButtons[idx].click();
+        // Re-set the hash since the click handler uses replaceState
+        history.replaceState(null, "", "#" + hash);
+      }, 150);
+    }
   }
 
   function patchGeneratorModal() {
@@ -249,6 +302,21 @@
     const newBtn = genBtn.cloneNode(true);
     genBtn.parentNode.replaceChild(newBtn, genBtn);
 
+    // ── Add "Test One Section" button ──
+    if (!footer.querySelector(".test-one-btn")) {
+      const testBtn = document.createElement("button");
+      testBtn.className = "test-one-btn flex items-center gap-2 px-4 py-2.5 rounded-md font-medium transition-colors";
+      testBtn.style.cssText =
+        "background: var(--bg-deep); color: var(--text-secondary); border: 1px solid var(--border-subtle); display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 6px; font-family: var(--font-body); font-size: 0.82rem; font-weight: 500; cursor: pointer; margin-right: 8px;";
+      testBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Test One Section`;
+      newBtn.parentNode.insertBefore(testBtn, newBtn);
+
+      testBtn.addEventListener("click", () => handleTestOneSection(body, testBtn));
+    }
+
+    // ── Update button text to "Generate This Chapter" ──
+    newBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg> Generate This Chapter`;
+
     let _generating = false;
     let _abort = false;
 
@@ -272,52 +340,31 @@
       clearError(body);
 
       try {
-        // Step 1: Extract sections by switching through chapters
-        const navButtons = document.querySelectorAll("nav button");
-        const CHAPTERS = [
-          { num: 1 }, { num: 2 }, { num: 3 }, { num: 4 },
-          { num: 5 }, { num: 6 }, { num: 7 }, { num: 8 },
-        ];
+        // Extract sections from the currently visible chapter only
+        const article = document.querySelector("main article.prose-body") ||
+                        document.querySelector("main .prose-body") ||
+                        document.querySelector("main > div > div");
+        if (!article) throw new Error("Cannot find chapter content in DOM");
 
-        const allSections = [];
-        let globalOffset = 0;
+        const activeChapterNum = detectActiveChapter();
+        const chapterSections = extractSections(article, activeChapterNum, 0);
 
-        showProgress(body, 0, CHAPTERS.length, "Extracting chapter text...");
-
-        for (let chIdx = 0; chIdx < CHAPTERS.length; chIdx++) {
-          if (_abort) break;
-
-          const btn = navButtons[chIdx];
-          if (btn) {
-            btn.click();
-            await sleep(200);
-          }
-
-          const article = document.querySelector("main article.prose-body") ||
-                          document.querySelector("main .prose-body") ||
-                          document.querySelector("main > div > div");
-          if (!article) continue;
-
-          const chSections = extractSections(article, CHAPTERS[chIdx].num, globalOffset);
-          globalOffset += chSections.length;
-          allSections.push(...chSections);
-        }
-
-        if (allSections.length === 0) {
-          showError(body, "Could not extract any sections from the chapters. Check the DOM structure.");
+        if (chapterSections.length === 0) {
+          showError(body, "No sections found in the current chapter.");
           return;
         }
 
-        // Step 2: Generate via server
-        for (let i = 0; i < allSections.length; i++) {
+        showProgress(body, 0, chapterSections.length, `Generating Ch${activeChapterNum} (${chapterSections.length} sections)...`);
+
+        for (let i = 0; i < chapterSections.length; i++) {
           if (_abort) break;
 
-          const section = allSections[i];
+          const section = chapterSections[i];
           showProgress(
             body,
             i + 1,
-            allSections.length,
-            `Ch${section.chapterId.replace("ch", "")} — ${section.title.slice(0, 40)}...`
+            chapterSections.length,
+            `Ch${activeChapterNum} — ${section.title.slice(0, 40)}...`
           );
 
           try {
@@ -331,36 +378,122 @@
               break;
             }
             if (msg.includes("429")) {
-              showProgress(body, i + 1, allSections.length, "Rate limited, waiting 30s...");
+              showProgress(body, i + 1, chapterSections.length, "Rate limited, waiting 30s...");
               await sleep(30000);
               i--; // retry
               continue;
             }
-            // Continue with next section on other errors
           }
         }
 
-        // Navigate back to ch1
-        if (!_abort && navButtons[0]) {
-          navButtons[0].click();
-        }
-
-        // Refresh the page to pick up new audio files
         if (!_abort) {
-          showProgress(body, allSections.length, allSections.length, "Done! Reloading to pick up audio...");
+          showProgress(body, chapterSections.length, chapterSections.length, `Ch${activeChapterNum} done! Reloading...`);
           await sleep(1500);
+          // Preserve current chapter in hash before reload
+          history.replaceState(null, "", "#ch" + activeChapterNum);
           window.location.reload();
         }
       } catch (e) {
         showError(body, e.message || "Generation failed");
       } finally {
         _generating = false;
-        newBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg> Generate All Audio`;
+        newBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg> Generate This Chapter`;
         newBtn.style.cssText =
           "background: var(--amber-bright); color: var(--bg-deep); border: none; display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 6px; font-family: var(--font-body); font-size: 0.85rem; font-weight: 500; cursor: pointer;";
         hideProgress(body);
       }
     });
+  }
+
+  // ─── Detect which chapter is currently active ───
+
+  function detectActiveChapter() {
+    const navButtons = document.querySelectorAll("nav button");
+    // Look for the active nav button
+    const activeNav = document.querySelector("nav button.active") || document.querySelector("nav .active");
+    if (activeNav) {
+      const btn = activeNav.closest("button") || activeNav;
+      const idx = Array.from(navButtons).indexOf(btn);
+      if (idx >= 0) return idx + 1;
+    }
+    // Fallback: check for visual active state (font-weight 600)
+    for (let i = 0; i < navButtons.length; i++) {
+      const spans = navButtons[i].querySelectorAll("span");
+      for (const span of spans) {
+        const fw = window.getComputedStyle(span).fontWeight;
+        if (fw === "600" || fw === "bold" || fw === "700") return i + 1;
+      }
+    }
+    return 1; // default to chapter 1
+  }
+
+  // ─── Test One Section handler ───
+
+  async function handleTestOneSection(body, testBtn) {
+    if (!_apiKeyConfigured) {
+      showError(body, "OPENAI_API_KEY not set. Add it to your .env file and restart the server.");
+      return;
+    }
+
+    clearError(body);
+    const origHTML = testBtn.innerHTML;
+    testBtn.innerHTML = `<svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg> Testing...`;
+    testBtn.disabled = true;
+    testBtn.style.opacity = "0.6";
+
+    try {
+      // Extract sections from the currently visible chapter only (no switching)
+      const article = document.querySelector("main article.prose-body") ||
+                      document.querySelector("main .prose-body") ||
+                      document.querySelector("main > div > div");
+      if (!article) throw new Error("Cannot find chapter content in DOM");
+
+      const activeChapterNum = detectActiveChapter();
+      const sections = extractSections(article, activeChapterNum, 0);
+      if (sections.length === 0) {
+        throw new Error("No sections found in the current chapter. Try navigating to a chapter first.");
+      }
+
+      // Pick the first section
+      const section = sections[0];
+      showProgress(body, 1, 1, `Testing: ${section.id} — "${section.title.slice(0, 50)}..."`);
+
+      const result = await serverGenerateTTS(section.id, section.text, section.words, _selectedVoice);
+
+      hideProgress(body);
+
+      // Show success with details
+      const successEl = document.createElement("div");
+      successEl.className = "server-test-result p-3 rounded-md";
+      successEl.style.cssText =
+        "background: var(--sage-faint, rgba(120,180,120,0.1)); border: 1px solid var(--sage-dim, rgba(120,180,120,0.3)); color: var(--sage-bright, #7cb342); font-family: var(--font-body); font-size: 0.8rem; margin-top: 8px;";
+      const fileSizeKB = result.fileSize ? (result.fileSize / 1024).toFixed(1) : "?";
+      successEl.innerHTML = `
+        <strong>Test passed!</strong><br>
+        <span style="font-size: 0.72rem; color: var(--text-muted);">
+          Section: <code>${section.id}</code> — "${section.title}"<br>
+          File: audio/${section.id}.mp3 (${fileSizeKB} KB)<br>
+          Voice: ${_selectedVoice} — Duration: ~${result.duration ? result.duration.toFixed(1) : "?"}s<br>
+          Words extracted: ${section.words.length}
+        </span>
+        <div style="margin-top: 8px;">
+          <audio controls src="${sectionIdToAudioUrl(section.id)}" style="width: 100%; height: 36px;" preload="auto"></audio>
+        </div>
+      `;
+
+      // Remove any previous test result
+      const prev = body.querySelector(".server-test-result");
+      if (prev) prev.remove();
+      body.appendChild(successEl);
+
+    } catch (e) {
+      hideProgress(body);
+      showError(body, "Test failed: " + (e.message || String(e)));
+    } finally {
+      testBtn.innerHTML = origHTML;
+      testBtn.disabled = false;
+      testBtn.style.opacity = "1";
+    }
   }
 
   // ─── Section extraction (mirrors tts.ts logic) ───
@@ -534,7 +667,7 @@
 
               // Load the static file and store it
               try {
-                const resp = await fetch(`/audio/${id}.mp3`);
+                const resp = await fetch(sectionIdToAudioUrl(id));
                 if (!resp.ok) return;
                 const blob = await resp.blob();
 

@@ -87,12 +87,26 @@ app.get("/api/status", (req, res) => {
 });
 
 // ─── API: List available audio files ───
+// Scans audio/{ch1,ch2,...}/*.mp3 subdirectories and returns section IDs
 app.get("/api/audio", (req, res) => {
   try {
-    const files = fs.readdirSync(AUDIO_DIR)
-      .filter(f => f.endsWith(".mp3"))
-      .map(f => f.replace(".mp3", ""));
-    res.json({ sections: files });
+    const sections = [];
+    const entries = fs.readdirSync(AUDIO_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        // Scan subdirectory (e.g. audio/ch1/)
+        const subDir = path.join(AUDIO_DIR, entry.name);
+        const files = fs.readdirSync(subDir).filter(f => f.endsWith(".mp3"));
+        for (const file of files) {
+          // ch1/s0.mp3 → ch1_s0
+          sections.push(`${entry.name}_${file.replace(".mp3", "")}`);
+        }
+      } else if (entry.isFile() && entry.name.endsWith(".mp3")) {
+        // Also support flat files for backwards compatibility
+        sections.push(entry.name.replace(".mp3", ""));
+      }
+    }
+    res.json({ sections });
   } catch {
     res.json({ sections: [] });
   }
@@ -154,22 +168,25 @@ app.post("/api/tts", async (req, res) => {
 
     const fullBuffer = Buffer.concat(audioBuffers);
 
-    // Save to audio/ directory
-    const filePath = path.join(AUDIO_DIR, `${sectionId}.mp3`);
+    // Save to audio/{chapter}/{section}.mp3
+    const filePath = sectionIdToPath(sectionId);
+    const fileDir = path.dirname(filePath);
+    if (!fs.existsSync(fileDir)) fs.mkdirSync(fileDir, { recursive: true });
     fs.writeFileSync(filePath, fullBuffer);
 
     // Estimate duration from file size (MP3 ~128kbps = 16KB/s)
     const estimatedDuration = fullBuffer.length / (128 * 128);
     const wordTimings = estimateWordTimings(words || [], estimatedDuration);
 
-    console.log(`  ✓ Saved ${sectionId}.mp3 (${(fullBuffer.length / 1024).toFixed(1)} KB)`);
+    const urlPath = sectionIdToUrlPath(sectionId);
+    console.log(`  ✓ Saved ${urlPath} (${(fullBuffer.length / 1024).toFixed(1)} KB)`);
 
     res.json({
       sectionId,
       duration: estimatedDuration,
       wordTimings,
       fileSize: fullBuffer.length,
-      filePath: `/audio/${sectionId}.mp3`,
+      filePath: urlPath,
     });
   } catch (err) {
     console.error(`  ✗ Failed ${sectionId}:`, err.message);
@@ -180,12 +197,25 @@ app.post("/api/tts", async (req, res) => {
 // ─── API: Delete all audio files ───
 app.delete("/api/audio", (req, res) => {
   try {
-    const files = fs.readdirSync(AUDIO_DIR).filter(f => f.endsWith(".mp3"));
-    for (const file of files) {
-      fs.unlinkSync(path.join(AUDIO_DIR, file));
+    let count = 0;
+    const entries = fs.readdirSync(AUDIO_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const subDir = path.join(AUDIO_DIR, entry.name);
+        const files = fs.readdirSync(subDir).filter(f => f.endsWith(".mp3"));
+        for (const file of files) {
+          fs.unlinkSync(path.join(subDir, file));
+          count++;
+        }
+        // Remove empty subdirectory
+        if (fs.readdirSync(subDir).length === 0) fs.rmdirSync(subDir);
+      } else if (entry.isFile() && entry.name.endsWith(".mp3")) {
+        fs.unlinkSync(path.join(AUDIO_DIR, entry.name));
+        count++;
+      }
     }
-    console.log(`  ✓ Cleared ${files.length} audio files`);
-    res.json({ cleared: files.length });
+    console.log(`  ✓ Cleared ${count} audio files`);
+    res.json({ cleared: count });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -193,17 +223,35 @@ app.delete("/api/audio", (req, res) => {
 
 // ─── API: Delete a single audio file ───
 app.delete("/api/audio/:sectionId", (req, res) => {
-  const filePath = path.join(AUDIO_DIR, `${req.params.sectionId}.mp3`);
+  const filePath = sectionIdToPath(req.params.sectionId);
   try {
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
-      console.log(`  ✓ Deleted ${req.params.sectionId}.mp3`);
+      console.log(`  ✓ Deleted ${req.params.sectionId}`);
     }
     res.json({ deleted: req.params.sectionId });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── Path helpers ───
+// Converts sectionId "ch1_s0" → "ch1/s0.mp3", "ch2_intro" → "ch2/intro.mp3"
+function sectionIdToPath(sectionId) {
+  const sepIdx = sectionId.indexOf("_");
+  if (sepIdx < 0) return path.join(AUDIO_DIR, sectionId + ".mp3");
+  const chapter = sectionId.slice(0, sepIdx);
+  const section = sectionId.slice(sepIdx + 1);
+  return path.join(AUDIO_DIR, chapter, section + ".mp3");
+}
+
+function sectionIdToUrlPath(sectionId) {
+  const sepIdx = sectionId.indexOf("_");
+  if (sepIdx < 0) return `/audio/${sectionId}.mp3`;
+  const chapter = sectionId.slice(0, sepIdx);
+  const section = sectionId.slice(sepIdx + 1);
+  return `/audio/${chapter}/${section}.mp3`;
+}
 
 // ─── Helpers ───
 

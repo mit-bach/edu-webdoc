@@ -442,3 +442,44 @@ parsed = DiscoveryOutput.model_validate(response.tool_calls[0].arguments)`})}),(
     });
 })();
 </script>
+<script>
+// Chapter persistence via URL hash — works on both local dev and GitHub Pages.
+// Restores the active chapter from #ch1-#ch8 in the URL after React mounts.
+(function(){
+  var valid=["ch1","ch2","ch3","ch4","ch5","ch6","ch7","ch8"];
+  function restore(){
+    var h=location.hash.replace("#","");
+    var idx=valid.indexOf(h);
+    if(idx<0) return;
+    var btns=document.querySelectorAll("nav button");
+    if(btns[idx]) btns[idx].click();
+  }
+  // Restore on initial load (after React mounts)
+  function init(){
+    if(!location.hash) return;
+    setTimeout(restore,300);
+  }
+  if(document.readyState==="complete") init();
+  else window.addEventListener("load",init);
+  // Sync hash on nav clicks
+  function syncHash(){
+    var btns=document.querySelectorAll("nav button");
+    btns.forEach(function(btn,i){
+      btn.addEventListener("click",function(){
+        if(valid[i]) history.replaceState(null,"","#"+valid[i]);
+      });
+    });
+  }
+  // Wait for React to render nav buttons
+  var mo=new MutationObserver(function(){
+    if(document.querySelectorAll("nav button").length>=8){
+      mo.disconnect();
+      syncHash();
+      init();
+    }
+  });
+  mo.observe(document.body,{childList:true,subtree:true});
+  // Back/forward navigation
+  window.addEventListener("hashchange",restore);
+})();
+</script>
