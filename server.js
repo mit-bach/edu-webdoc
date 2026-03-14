@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3333;
 const AUDIO_DIR = path.join(__dirname, "audio");
-const HTML_FILE = path.join(__dirname, "arch-v1-edu.html");
+const HTML_FILE = path.join(__dirname, "index.html");
 const PATCH_FILE = path.join(__dirname, "client-patch.js");
 
 // ─── Ensure audio/ directory exists ───

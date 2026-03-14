@@ -93,6 +93,12 @@
     if (modals.length === 0) return;
 
     const modal = modals[modals.length - 1];
+
+    // Always re-run patchAdvancedSettings since it may appear later when
+    // the user expands the accordion. Only skip the one-time patches.
+    const body = modal.querySelector(".p-5.space-y-4");
+    patchAdvancedSettings(body);
+
     if (modal.dataset.patched === "true") return;
     modal.dataset.patched = "true";
 
@@ -103,7 +109,6 @@
     }
 
     // ── Add mode indicator ──
-    const body = modal.querySelector(".p-5.space-y-4");
     if (body && !body.querySelector(".dev-mode-indicator")) {
       const indicator = document.createElement("div");
       indicator.className = "dev-mode-indicator flex items-center gap-2 px-3 py-2 rounded-md";
