@@ -70,7 +70,7 @@ app.get("/", (req, res) => {
   }
 });
 
-// Serve other static files (CSS, etc.) — but NOT arch-v1-edu.html as index
+// Serve other static files (CSS, etc.) — but NOT index.html as auto-index
 // (our custom "/" handler above takes care of that)
 app.use(express.static(__dirname, {
   index: false, // Disable auto-index so our custom handler wins

@@ -1,5 +1,5 @@
 // ─── Client Patch: Local Dev Server Integration ───
-// This script is injected by server.js into arch-v1-edu.html at runtime.
+// This script is injected by server.js into index.html at runtime.
 // It overrides the compiled-in TTS generation to route through the local
 // server API, which saves .mp3 files directly to the project's audio/ folder.
 // The OpenAI API key stays server-side — never entered in the browser.
