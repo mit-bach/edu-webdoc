@@ -16,18 +16,18 @@ const TTS_MODEL = "gpt-4o-mini-tts-2025-12-15";
 // ─── Types ───
 
 export interface SectionInfo {
-  id: string;          // "ch1_s0", "ch1_s1", ...
-  chapterId: string;   // "ch1"
-  title: string;       // Section heading text
-  text: string;        // Full prose text for TTS
-  words: string[];     // Individual words for highlighting
-  order: number;       // Global ordering across all chapters
+  id: string; // "ch1_s0", "ch1_s1", ...
+  chapterId: string; // "ch1"
+  title: string; // Section heading text
+  text: string; // Full prose text for TTS
+  words: string[]; // Individual words for highlighting
+  order: number; // Global ordering across all chapters
 }
 
 export interface StoredAudio {
   id: string;
-  audioBase64: string;  // base64-encoded mp3
-  duration: number;     // seconds
+  audioBase64: string; // base64-encoded mp3
+  duration: number; // seconds
   wordTimings: number[]; // start time for each word (seconds)
   text: string;
   words: string[];
@@ -57,7 +57,9 @@ export async function checkLocalDevMode(): Promise<boolean> {
   if (_isLocalDev !== null) return _isLocalDev;
 
   try {
-    const resp = await fetch("/api/status", { signal: AbortSignal.timeout(2000) });
+    const resp = await fetch("/api/status", {
+      signal: AbortSignal.timeout(2000),
+    });
     if (resp.ok) {
       const data = await resp.json();
       if (data.mode === "local") {
@@ -87,7 +89,7 @@ export async function serverGenerateTTS(
   sectionId: string,
   text: string,
   words: string[],
-  voice: string = "nova"
+  voice: string = "nova",
 ): Promise<ServerTTSResult> {
   const resp = await fetch("/api/tts", {
     method: "POST",
@@ -96,7 +98,9 @@ export async function serverGenerateTTS(
   });
 
   if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+    const err = await resp
+      .json()
+      .catch(() => ({ error: `HTTP ${resp.status}` }));
     throw new Error(err.error || `Server TTS error ${resp.status}`);
   }
 
@@ -200,7 +204,9 @@ export function sectionIdToAudioUrl(sectionId: string): string {
   return `/audio/${chapter}/${section}.mp3`;
 }
 
-export async function tryLoadStaticAudio(sectionId: string): Promise<Blob | null> {
+export async function tryLoadStaticAudio(
+  sectionId: string,
+): Promise<Blob | null> {
   try {
     const resp = await fetch(sectionIdToAudioUrl(sectionId));
     if (resp.ok) return resp.blob();
@@ -215,7 +221,7 @@ export async function tryLoadStaticAudio(sectionId: string): Promise<Blob | null
 export async function generateSpeech(
   text: string,
   apiKey: string,
-  voice: string = "nova"
+  voice: string = "nova",
 ): Promise<Blob> {
   if (text.length <= TTS_CHAR_LIMIT) {
     return callTTS(text, apiKey, voice);
@@ -226,16 +232,20 @@ export async function generateSpeech(
   for (const chunk of chunks) {
     const blob = await callTTS(chunk, apiKey, voice);
     blobs.push(blob);
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 200));
   }
   return new Blob(blobs, { type: "audio/mpeg" });
 }
 
-async function callTTS(text: string, apiKey: string, voice: string): Promise<Blob> {
+async function callTTS(
+  text: string,
+  apiKey: string,
+  voice: string,
+): Promise<Blob> {
   const resp = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -277,7 +287,7 @@ function chunkText(text: string, maxLen: number): string[] {
 export function extractSectionsFromChapter(
   container: HTMLElement,
   chapterNum: number,
-  globalOffset: number
+  globalOffset: number,
 ): SectionInfo[] {
   const sections: SectionInfo[] = [];
   const chapterId = `ch${chapterNum}`;
@@ -308,7 +318,8 @@ export function extractSectionsFromChapter(
 
   // Each h2 section
   h2Indices.forEach((h2Idx, i) => {
-    const nextH2Idx = i + 1 < h2Indices.length ? h2Indices[i + 1] : allChildren.length;
+    const nextH2Idx =
+      i + 1 < h2Indices.length ? h2Indices[i + 1] : allChildren.length;
     const sectionEls = allChildren.slice(h2Idx, nextH2Idx);
     const title = sectionEls[0]?.textContent?.trim() || "Untitled";
     const text = extractTextFromElements(sectionEls);
@@ -343,7 +354,8 @@ function extractTextFromElements(elements: Element[]): string {
       el.classList.contains("section-divider") ||
       tag === "SVG" ||
       tag === "TABLE"
-    ) continue;
+    )
+      continue;
 
     if (el.querySelector?.(".code-block")) continue;
 
@@ -353,8 +365,11 @@ function extractTextFromElements(elements: Element[]): string {
       parts.push(el.textContent?.trim() || "");
     } else if (tag === "UL" || tag === "OL") {
       const items = el.querySelectorAll("li");
-      items.forEach(li => parts.push(li.textContent?.trim() || ""));
-    } else if (el.classList.contains("callout") || el.classList.contains("pull-quote")) {
+      items.forEach((li) => parts.push(li.textContent?.trim() || ""));
+    } else if (
+      el.classList.contains("callout") ||
+      el.classList.contains("pull-quote")
+    ) {
       parts.push(el.textContent?.trim() || "");
     } else if (tag === "DIV") {
       const inner = extractTextFromElements(Array.from(el.children));
@@ -366,7 +381,7 @@ function extractTextFromElements(elements: Element[]): string {
 }
 
 function textToWords(text: string): string[] {
-  return text.split(/\s+/).filter(w => w.length > 0);
+  return text.split(/\s+/).filter((w) => w.length > 0);
 }
 
 // ─── Word timing estimation ───
@@ -380,7 +395,10 @@ function estimateSyllables(word: string): number {
   return Math.max(1, count);
 }
 
-export function estimateWordTimings(words: string[], durationSeconds: number): number[] {
+export function estimateWordTimings(
+  words: string[],
+  durationSeconds: number,
+): number[] {
   if (words.length === 0) return [];
   if (words.length === 1) return [0];
 
@@ -396,7 +414,10 @@ export function estimateWordTimings(words: string[], durationSeconds: number): n
   });
 
   const totalPauseTime = sentencePauses * pauseWeight;
-  const speechTime = Math.max(durationSeconds - totalPauseTime, durationSeconds * 0.8);
+  const speechTime = Math.max(
+    durationSeconds - totalPauseTime,
+    durationSeconds * 0.8,
+  );
   const timePerSyllable = speechTime / totalSyllables;
 
   const timings: number[] = [];
@@ -473,6 +494,6 @@ export async function downloadAudioFiles(): Promise<void> {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, 300));
   }
 }

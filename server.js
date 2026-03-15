@@ -33,7 +33,7 @@ function updateManifest() {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const subDir = path.join(AUDIO_DIR, entry.name);
-        const files = fs.readdirSync(subDir).filter(f => f.endsWith(".mp3"));
+        const files = fs.readdirSync(subDir).filter((f) => f.endsWith(".mp3"));
         for (const file of files) {
           sections.push(`${entry.name}_${file.replace(".mp3", "")}`);
         }
@@ -98,9 +98,11 @@ app.get("/", (req, res) => {
 
 // Serve other static files (CSS, etc.) — but NOT index.html as auto-index
 // (our custom "/" handler above takes care of that)
-app.use(express.static(__dirname, {
-  index: false, // Disable auto-index so our custom handler wins
-}));
+app.use(
+  express.static(__dirname, {
+    index: false, // Disable auto-index so our custom handler wins
+  }),
+);
 
 // ─── API: Health / mode detection ───
 app.get("/api/status", (req, res) => {
@@ -109,6 +111,8 @@ app.get("/api/status", (req, res) => {
     mode: "local",
     apiKeyConfigured: !!apiKey,
     audioDir: "audio/",
+    defaultVoice: process.env.TTS_VOICE || "cedar",
+    defaultInstructions: process.env.TTS_INSTRUCTIONS || "",
   });
 });
 
@@ -122,7 +126,7 @@ app.get("/api/audio", (req, res) => {
       if (entry.isDirectory()) {
         // Scan subdirectory (e.g. audio/ch1/)
         const subDir = path.join(AUDIO_DIR, entry.name);
-        const files = fs.readdirSync(subDir).filter(f => f.endsWith(".mp3"));
+        const files = fs.readdirSync(subDir).filter((f) => f.endsWith(".mp3"));
         for (const file of files) {
           // ch1/s0.mp3 → ch1_s0
           sections.push(`${entry.name}_${file.replace(".mp3", "")}`);
@@ -145,15 +149,19 @@ app.get("/api/audio", (req, res) => {
 app.post("/api/tts", async (req, res) => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: "OPENAI_API_KEY not set in server environment. Add it to your .env file and restart." });
+    return res.status(500).json({
+      error:
+        "OPENAI_API_KEY not set in server environment. Add it to your .env file and restart.",
+    });
   }
 
-  const { sectionId, text, words, voice } = req.body;
+  const { sectionId, text, words, voice, instructions } = req.body;
   if (!sectionId || !text) {
     return res.status(400).json({ error: "sectionId and text are required" });
   }
 
-  const ttsVoice = voice || "nova";
+  const ttsVoice = voice || process.env.TTS_VOICE || "cedar";
+  const ttsInstructions = instructions || process.env.TTS_INSTRUCTIONS || "";
   const TTS_MODEL = "gpt-4o-mini-tts-2025-12-15";
   const TTS_CHAR_LIMIT = 4000;
 
@@ -165,13 +173,14 @@ app.post("/api/tts", async (req, res) => {
       const response = await fetch("https://api.openai.com/v1/audio/speech", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           model: TTS_MODEL,
           voice: ttsVoice,
           input: chunk,
+          ...(ttsInstructions ? { instructions: ttsInstructions } : {}),
           response_format: "mp3",
           speed: 1.0,
         }),
@@ -188,7 +197,7 @@ app.post("/api/tts", async (req, res) => {
       audioBuffers.push(buffer);
 
       if (chunks.length > 1) {
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 200));
       }
     }
 
@@ -205,7 +214,9 @@ app.post("/api/tts", async (req, res) => {
     const wordTimings = estimateWordTimings(words || [], estimatedDuration);
 
     const urlPath = sectionIdToUrlPath(sectionId);
-    console.log(`  ✓ Saved ${urlPath} (${(fullBuffer.length / 1024).toFixed(1)} KB)`);
+    console.log(
+      `  ✓ Saved ${urlPath} (${(fullBuffer.length / 1024).toFixed(1)} KB)`,
+    );
 
     // Update manifest so GitHub Pages knows about this section
     updateManifest();
@@ -231,7 +242,7 @@ app.delete("/api/audio", (req, res) => {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const subDir = path.join(AUDIO_DIR, entry.name);
-        const files = fs.readdirSync(subDir).filter(f => f.endsWith(".mp3"));
+        const files = fs.readdirSync(subDir).filter((f) => f.endsWith(".mp3"));
         for (const file of files) {
           fs.unlinkSync(path.join(subDir, file));
           count++;
@@ -313,12 +324,15 @@ function estimateWordTimings(words, durationSeconds) {
 
   const pauseWeight = 0.3;
   let sentencePauses = 0;
-  words.forEach(word => {
+  words.forEach((word) => {
     if (/[.!?]$/.test(word)) sentencePauses++;
   });
 
   const totalPauseTime = sentencePauses * pauseWeight;
-  const speechTime = Math.max(durationSeconds - totalPauseTime, durationSeconds * 0.8);
+  const speechTime = Math.max(
+    durationSeconds - totalPauseTime,
+    durationSeconds * 0.8,
+  );
   const timePerSyllable = speechTime / totalSyllables;
 
   const timings = [];
@@ -353,7 +367,9 @@ app.listen(PORT, () => {
   console.log("  │  Architecture V1 — Local Dev Server            │");
   console.log(`  │  http://localhost:${PORT}                          │`);
   console.log("  │                                                 │");
-  console.log(`  │  API Key: ${hasKey ? "✓ configured                       " : "✗ missing (set OPENAI_API_KEY in .env)"}  │`);
+  console.log(
+    `  │  API Key: ${hasKey ? "✓ configured                       " : "✗ missing (set OPENAI_API_KEY in .env)"}  │`,
+  );
   console.log(`  │  Audio dir: ./audio/                            │`);
   console.log(`  │  Patch: client-patch.js injected into HTML      │`);
   console.log("  └───────────────────────────────────────────────┘");

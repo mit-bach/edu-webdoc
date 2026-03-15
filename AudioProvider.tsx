@@ -1,4 +1,12 @@
-import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  type ReactNode,
+} from "react";
 import {
   type SectionInfo,
   type StoredAudio,
@@ -72,7 +80,9 @@ export function useAudio() {
 export function AudioProvider({ children }: { children: ReactNode }) {
   // State
   const [audioReady, setAudioReady] = useState(false);
-  const [availableSections, setAvailableSections] = useState<Set<string>>(new Set());
+  const [availableSections, setAvailableSections] = useState<Set<string>>(
+    new Set(),
+  );
   const [currentSectionId, setCurrentSectionId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -157,14 +167,18 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   // Apply word highlighting to DOM
   useEffect(() => {
     if (!currentSectionId || currentWordIndex < 0 || !highlightingEnabled) {
-      document.querySelectorAll(".aw--active").forEach(el => el.classList.remove("aw--active"));
+      document
+        .querySelectorAll(".aw--active")
+        .forEach((el) => el.classList.remove("aw--active"));
       return;
     }
 
-    document.querySelectorAll(".aw--active").forEach(el => el.classList.remove("aw--active"));
+    document
+      .querySelectorAll(".aw--active")
+      .forEach((el) => el.classList.remove("aw--active"));
 
     const wordEl = document.querySelector(
-      `.aw[data-section="${currentSectionId}"][data-w="${currentWordIndex}"]`
+      `.aw[data-section="${currentSectionId}"][data-w="${currentWordIndex}"]`,
     );
     if (wordEl) {
       wordEl.classList.add("aw--active");
@@ -185,11 +199,13 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     const curId = currentDataRef.current?.id;
     if (!curId) return;
 
-    const curIdx = sectionsRef.current.findIndex(s => s.id === curId);
+    const curIdx = sectionsRef.current.findIndex((s) => s.id === curId);
     if (curIdx >= 0 && curIdx < sectionsRef.current.length - 1) {
       setTimeout(() => {
         const next = sectionsRef.current[curIdx + 1];
-        const seqCheckbox = document.querySelector('[data-sequential-mode]') as HTMLElement | null;
+        const seqCheckbox = document.querySelector(
+          "[data-sequential-mode]",
+        ) as HTMLElement | null;
         const isSeq = seqCheckbox?.dataset.sequentialMode === "true";
         if (isSeq) {
           loadAndPlaySection(next.id);
@@ -198,69 +214,78 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const loadAndPlaySection = useCallback(async (sectionId: string) => {
-    const audio = audioRef.current;
-    if (!audio) return;
+  const loadAndPlaySection = useCallback(
+    async (sectionId: string) => {
+      const audio = audioRef.current;
+      if (!audio) return;
 
-    // Try IndexedDB first
-    let data = await loadAudio(sectionId);
+      // Try IndexedDB first
+      let data = await loadAudio(sectionId);
 
-    if (!data) {
-      // Try loading from static /audio/ directory (works for both local dev + GitHub Pages)
-      const staticBlob = await tryLoadStaticAudio(sectionId);
-      if (staticBlob) {
-        const b64 = await blobToBase64(staticBlob);
-        const dur = await getAudioDuration(staticBlob);
-        const section = sectionsRef.current.find(s => s.id === sectionId);
-        const words = section?.words || [];
-        const timings = estimateWordTimings(words, dur);
-        data = {
-          id: sectionId,
-          audioBase64: b64,
-          duration: dur,
-          wordTimings: timings,
-          text: section?.text || "",
-          words,
-        };
+      if (!data) {
+        // Try loading from static /audio/ directory (works for both local dev + GitHub Pages)
+        const staticBlob = await tryLoadStaticAudio(sectionId);
+        if (staticBlob) {
+          const b64 = await blobToBase64(staticBlob);
+          const dur = await getAudioDuration(staticBlob);
+          const section = sectionsRef.current.find((s) => s.id === sectionId);
+          const words = section?.words || [];
+          const timings = estimateWordTimings(words, dur);
+          data = {
+            id: sectionId,
+            audioBase64: b64,
+            duration: dur,
+            wordTimings: timings,
+            text: section?.text || "",
+            words,
+          };
+        }
       }
-    }
 
-    if (!data) return;
+      if (!data) return;
 
-    currentDataRef.current = data;
-    setCurrentSectionId(sectionId);
-    setDuration(data.duration);
-    setCurrentWordIndex(-1);
-    setCurrentTime(0);
+      currentDataRef.current = data;
+      setCurrentSectionId(sectionId);
+      setDuration(data.duration);
+      setCurrentWordIndex(-1);
+      setCurrentTime(0);
 
-    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
 
-    const blob = base64ToBlob(data.audioBase64);
-    const url = URL.createObjectURL(blob);
-    blobUrlRef.current = url;
+      const blob = base64ToBlob(data.audioBase64);
+      const url = URL.createObjectURL(blob);
+      blobUrlRef.current = url;
 
-    audio.src = url;
-    audio.playbackRate = playbackRate;
-    try {
-      await audio.play();
-    } catch (e) {
-      console.warn("Audio play failed (may need user interaction):", e);
-    }
-  }, [playbackRate]);
+      audio.src = url;
+      audio.playbackRate = playbackRate;
+      try {
+        await audio.play();
+      } catch (e) {
+        console.warn("Audio play failed (may need user interaction):", e);
+      }
+    },
+    [playbackRate],
+  );
 
   // ─── Actions ───
 
-  const playSectionFromBeginning = useCallback((sectionId: string) => {
-    loadAndPlaySection(sectionId);
-  }, [loadAndPlaySection]);
-
-  const playSection = useCallback((sectionId: string) => {
-    if (currentSectionId === sectionId && audioRef.current) {
-      audioRef.current.play();
-    } else {
+  const playSectionFromBeginning = useCallback(
+    (sectionId: string) => {
       loadAndPlaySection(sectionId);
-    }
-  }, [currentSectionId, loadAndPlaySection]);
+    },
+    [loadAndPlaySection],
+  );
+
+  const playSection = useCallback(
+    (sectionId: string) => {
+      if (currentSectionId === sectionId && audioRef.current) {
+        audioRef.current.play();
+      } else {
+        loadAndPlaySection(sectionId);
+      }
+    },
+    [currentSectionId, loadAndPlaySection],
+  );
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
@@ -270,15 +295,18 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     audioRef.current?.play();
   }, []);
 
-  const togglePlayPause = useCallback((sectionId: string) => {
-    if (currentSectionId === sectionId && isPlaying) {
-      pause();
-    } else if (currentSectionId === sectionId) {
-      resume();
-    } else {
-      loadAndPlaySection(sectionId);
-    }
-  }, [currentSectionId, isPlaying, pause, resume, loadAndPlaySection]);
+  const togglePlayPause = useCallback(
+    (sectionId: string) => {
+      if (currentSectionId === sectionId && isPlaying) {
+        pause();
+      } else if (currentSectionId === sectionId) {
+        resume();
+      } else {
+        loadAndPlaySection(sectionId);
+      }
+    },
+    [currentSectionId, isPlaying, pause, resume, loadAndPlaySection],
+  );
 
   const seekTo = useCallback((time: number) => {
     if (audioRef.current) {
@@ -289,7 +317,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
 
   const nextSection = useCallback(() => {
     if (!sections.length || !currentSectionId) return;
-    const idx = sections.findIndex(s => s.id === currentSectionId);
+    const idx = sections.findIndex((s) => s.id === currentSectionId);
     if (idx >= 0 && idx < sections.length - 1) {
       loadAndPlaySection(sections[idx + 1].id);
     }
@@ -297,7 +325,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
 
   const prevSection = useCallback(() => {
     if (!sections.length || !currentSectionId) return;
-    const idx = sections.findIndex(s => s.id === currentSectionId);
+    const idx = sections.findIndex((s) => s.id === currentSectionId);
     if (idx > 0) {
       loadAndPlaySection(sections[idx - 1].id);
     }
@@ -320,7 +348,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const markSectionAvailable = useCallback((id: string) => {
-    setAvailableSections(prev => {
+    setAvailableSections((prev) => {
       const next = new Set(prev);
       next.add(id);
       return next;
@@ -365,7 +393,10 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   return (
     <AudioContext.Provider value={value}>
       {/* Hidden data attribute for sequential mode (accessed by ended handler) */}
-      <div data-sequential-mode={String(sequentialMode)} style={{ display: "none" }} />
+      <div
+        data-sequential-mode={String(sequentialMode)}
+        style={{ display: "none" }}
+      />
       {children}
     </AudioContext.Provider>
   );
@@ -375,13 +406,13 @@ export function AudioProvider({ children }: { children: ReactNode }) {
 
 export function wrapWordsInSection(
   container: HTMLElement,
-  sectionId: string
+  sectionId: string,
 ): number {
   const proseSelectors = "p, li, .callout p, .pull-quote";
   const proseEls = container.querySelectorAll(proseSelectors);
   let wordIndex = 0;
 
-  proseEls.forEach(el => {
+  proseEls.forEach((el) => {
     if (el.closest(".code-block") || el.closest(".code-toggle-btn")) return;
     if (el.querySelector(".aw")) return;
 
@@ -421,7 +452,7 @@ export function wrapWordsInSection(
 
 export function clearWordWrapping(container: HTMLElement) {
   const spans = container.querySelectorAll(".aw");
-  spans.forEach(span => {
+  spans.forEach((span) => {
     const text = document.createTextNode(span.textContent || "");
     span.parentNode?.replaceChild(text, span);
   });
