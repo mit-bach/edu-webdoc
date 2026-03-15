@@ -18,11 +18,37 @@ const PORT = process.env.PORT || 3333;
 const AUDIO_DIR = path.join(__dirname, "audio");
 const HTML_FILE = path.join(__dirname, "index.html");
 const PATCH_FILE = path.join(__dirname, "client-patch.js");
+const MANIFEST_FILE = path.join(AUDIO_DIR, "manifest.json");
 
 // ─── Ensure audio/ directory exists ───
 if (!fs.existsSync(AUDIO_DIR)) {
   fs.mkdirSync(AUDIO_DIR, { recursive: true });
 }
+
+// ─── Scan audio files and write manifest.json ───
+function updateManifest() {
+  try {
+    const sections = [];
+    const entries = fs.readdirSync(AUDIO_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const subDir = path.join(AUDIO_DIR, entry.name);
+        const files = fs.readdirSync(subDir).filter(f => f.endsWith(".mp3"));
+        for (const file of files) {
+          sections.push(`${entry.name}_${file.replace(".mp3", "")}`);
+        }
+      } else if (entry.isFile() && entry.name.endsWith(".mp3")) {
+        sections.push(entry.name.replace(".mp3", ""));
+      }
+    }
+    fs.writeFileSync(MANIFEST_FILE, JSON.stringify({ sections }, null, 2));
+  } catch (err) {
+    console.error("Failed to update manifest:", err.message);
+  }
+}
+
+// Generate manifest on startup
+updateManifest();
 
 // ─── Middleware ───
 app.use(express.json({ limit: "50mb" }));
@@ -181,6 +207,9 @@ app.post("/api/tts", async (req, res) => {
     const urlPath = sectionIdToUrlPath(sectionId);
     console.log(`  ✓ Saved ${urlPath} (${(fullBuffer.length / 1024).toFixed(1)} KB)`);
 
+    // Update manifest so GitHub Pages knows about this section
+    updateManifest();
+
     res.json({
       sectionId,
       duration: estimatedDuration,
@@ -215,6 +244,7 @@ app.delete("/api/audio", (req, res) => {
       }
     }
     console.log(`  ✓ Cleared ${count} audio files`);
+    updateManifest();
     res.json({ cleared: count });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -229,6 +259,7 @@ app.delete("/api/audio/:sectionId", (req, res) => {
       fs.unlinkSync(filePath);
       console.log(`  ✓ Deleted ${req.params.sectionId}`);
     }
+    updateManifest();
     res.json({ deleted: req.params.sectionId });
   } catch (err) {
     res.status(500).json({ error: err.message });

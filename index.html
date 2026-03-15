@@ -408,22 +408,82 @@ parsed = DiscoveryOutput.model_validate(response.tool_calls[0].arguments)`})}),(
   
 
 <script>
-// GitHub Pages guard: hide Setup Audiobook UI when no local dev server is running.
+// GitHub Pages audio support: loads pre-generated audio from static files.
 // On localhost:3333, client-patch.js (injected by server.js) handles everything.
-// On static hosting, generation is impossible — so hide the button entirely.
+// On static hosting (GitHub Pages), this script:
+//   1. Loads audio/manifest.json to discover available sections
+//   2. Patches IDB getAllKeys so the React app sees them as available
+//   3. Patches fetch to rewrite flat audio URLs to subfolder structure
+//   4. Hides the "Setup Audiobook" button (generation not possible on static hosting)
+//      but keeps the per-chapter play controls visible
 (function(){
   fetch("/api/status",{signal:AbortSignal.timeout(2000)})
     .then(function(r){return r.ok?r.json():Promise.reject()})
-    .then(function(d){if(d&&d.mode==="local")return})
+    .then(function(d){if(d&&d.mode==="local")return}) // local dev — client-patch.js handles it
     .catch(function(){
-      // Not on local dev server — hide all audiobook setup triggers
-      function hide(){
+      // ─── Static hosting (GitHub Pages) ───
+
+      // Try to load manifest synchronously so patches are in place
+      // before React's useEffect calls refreshAvailability.
+      var manifestSections=[];
+      try{
+        var xhr=new XMLHttpRequest();
+        xhr.open("GET","audio/manifest.json",false);
+        xhr.send();
+        if(xhr.status===200){
+          manifestSections=JSON.parse(xhr.responseText).sections||[];
+        }
+      }catch(e){}
+
+      if(manifestSections.length>0){
+        // ─── Patch IDB getAllKeys ───
+        // The compiled React app calls loadAllAudioIds() which does
+        // indexedDB getAllKeys on the "sections" store. We intercept
+        // this to merge in our manifest section IDs so the UI shows
+        // play buttons even though IndexedDB is empty.
+        var origGetAllKeys=IDBObjectStore.prototype.getAllKeys;
+        IDBObjectStore.prototype.getAllKeys=function(){
+          var req=origGetAllKeys.apply(this,arguments);
+          if(this.name==="sections"){
+            // Add a listener that fires BEFORE the compiled onsuccess handler.
+            // It shadows req.result with our merged array.
+            req.addEventListener("success",function(){
+              var idbKeys=[];
+              try{idbKeys=Array.from(req.result||[])}catch(e){}
+              var merged=manifestSections.slice();
+              for(var i=0;i<idbKeys.length;i++){
+                if(merged.indexOf(idbKeys[i])===-1) merged.push(idbKeys[i]);
+              }
+              Object.defineProperty(req,"result",{value:merged,configurable:true});
+            });
+          }
+          return req;
+        };
+
+        // ─── Patch fetch for subfolder audio URLs ───
+        // Compiled code fetches /audio/ch1_s0.mp3 (flat), but files
+        // are stored as /audio/ch1/s0.mp3 (subfolders).
+        var origFetch=window.fetch;
+        window.fetch=function(url,opts){
+          if(typeof url==="string"){
+            var m=url.match(/^\/audio\/(ch\d+)_(.+\.mp3)$/);
+            if(m) url="/audio/"+m[1]+"/"+m[2];
+          }
+          return origFetch.call(this,url,opts);
+        };
+      }
+
+      // ─── Hide "Setup Audiobook" button ───
+      // Generation is impossible on static hosting, so hide the setup
+      // trigger. The per-chapter "Listen to Chapter" controls remain
+      // visible (they're driven by availableSections, which our IDB
+      // patch populates from the manifest).
+      function hideSetup(){
         document.querySelectorAll("button").forEach(function(b){
           if(b.textContent&&b.textContent.trim().match(/^(Setup Audiobook|Audio Ready)$/)){
             b.style.display="none";
           }
         });
-        // Also hide the sidebar and mobile audio setup container borders
         document.querySelectorAll(".border-t").forEach(function(el){
           if(el.querySelector&&el.querySelector("button")===null) return;
           var btn=el.querySelector("button");
@@ -432,11 +492,9 @@ parsed = DiscoveryOutput.model_validate(response.tool_calls[0].arguments)`})}),(
           }
         });
       }
-      // Run after React mounts
-      if(document.readyState==="complete") hide();
-      else window.addEventListener("load",hide);
-      // Also observe for late renders
-      var mo=new MutationObserver(hide);
+      if(document.readyState==="complete") hideSetup();
+      else window.addEventListener("load",hideSetup);
+      var mo=new MutationObserver(hideSetup);
       mo.observe(document.body,{childList:true,subtree:true});
       setTimeout(function(){mo.disconnect()},5000);
     });
