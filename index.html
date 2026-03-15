@@ -25794,7 +25794,15 @@ parsed = DiscoveryOutput.model_validate(response.tool_calls[0].arguments)`,
       //   4. Hides the "Setup Audiobook" button (generation not possible on static hosting)
       //      but keeps the per-chapter play controls visible
       (function () {
-        fetch("/api/status", { signal: AbortSignal.timeout(2000) })
+        // Detect base path for URL construction.
+        // GitHub Pages: /test_https/ or /test_https/index.html → basePath = "/test_https/"
+        // localhost:    / or /index.html                        → basePath = "/"
+        var basePath = location.pathname.slice(
+          0,
+          location.pathname.lastIndexOf("/") + 1,
+        );
+
+        fetch(basePath + "api/status", { signal: AbortSignal.timeout(2000) })
           .then(function (r) {
             return r.ok ? r.json() : Promise.reject();
           })
@@ -25809,7 +25817,7 @@ parsed = DiscoveryOutput.model_validate(response.tool_calls[0].arguments)`,
             var manifestSections = [];
             try {
               var xhr = new XMLHttpRequest();
-              xhr.open("GET", "audio/manifest.json", false);
+              xhr.open("GET", basePath + "audio/manifest.json", false);
               xhr.send();
               if (xhr.status === 200) {
                 manifestSections = JSON.parse(xhr.responseText).sections || [];
@@ -25820,41 +25828,74 @@ parsed = DiscoveryOutput.model_validate(response.tool_calls[0].arguments)`,
               // ─── Patch IDB getAllKeys ───
               // The compiled React app calls loadAllAudioIds() which does
               // indexedDB getAllKeys on the "sections" store. We intercept
-              // this to merge in our manifest section IDs so the UI shows
-              // play buttons even though IndexedDB is empty.
+              // the onsuccess setter so our merge runs deterministically
+              // before the compiled handler reads req.result.
               var origGetAllKeys = IDBObjectStore.prototype.getAllKeys;
+              var onsuccessDesc = Object.getOwnPropertyDescriptor(
+                IDBRequest.prototype,
+                "onsuccess",
+              );
+              var resultDesc = Object.getOwnPropertyDescriptor(
+                IDBRequest.prototype,
+                "result",
+              );
+
               IDBObjectStore.prototype.getAllKeys = function () {
                 var req = origGetAllKeys.apply(this, arguments);
                 if (this.name === "sections") {
-                  // Add a listener that fires BEFORE the compiled onsuccess handler.
-                  // It shadows req.result with our merged array.
-                  req.addEventListener("success", function () {
-                    var idbKeys = [];
-                    try {
-                      idbKeys = Array.from(req.result || []);
-                    } catch (e) {}
-                    var merged = manifestSections.slice();
-                    for (var i = 0; i < idbKeys.length; i++) {
-                      if (merged.indexOf(idbKeys[i]) === -1)
-                        merged.push(idbKeys[i]);
-                    }
-                    Object.defineProperty(req, "result", {
-                      value: merged,
-                      configurable: true,
-                    });
+                  var _storedFn = null;
+                  Object.defineProperty(req, "onsuccess", {
+                    get: function () {
+                      return _storedFn;
+                    },
+                    set: function (fn) {
+                      _storedFn = fn;
+                      // Register the REAL event handler via the prototype setter
+                      onsuccessDesc.set.call(req, function (evt) {
+                        // Read actual IDB result via prototype getter
+                        var realResult = resultDesc.get.call(req);
+                        var idbKeys = [];
+                        try {
+                          idbKeys = Array.from(realResult || []);
+                        } catch (e) {}
+                        var merged = manifestSections.slice();
+                        for (var i = 0; i < idbKeys.length; i++) {
+                          if (merged.indexOf(idbKeys[i]) === -1)
+                            merged.push(idbKeys[i]);
+                        }
+                        // Shadow result on instance before compiled handler reads it
+                        Object.defineProperty(req, "result", {
+                          value: merged,
+                          configurable: true,
+                        });
+                        fn.call(req, evt);
+                      });
+                    },
+                    configurable: true,
+                    enumerable: true,
                   });
                 }
                 return req;
               };
 
               // ─── Patch fetch for subfolder audio URLs ───
-              // Compiled code fetches /audio/ch1_s0.mp3 (flat), but files
-              // are stored as /audio/ch1/s0.mp3 (subfolders).
+              // Compiled code fetches /audio/ch1_s0.mp3 (absolute, flat).
+              // Files are stored as audio/ch1/s0.mp3 (subfolders).
+              // Rewrite to basePath-relative URL so it works on GitHub Pages
+              // subpath (/test_https/) and localhost (/) equally.
               var origFetch = window.fetch;
               window.fetch = function (url, opts) {
                 if (typeof url === "string") {
-                  var m = url.match(/^\/audio\/(ch\d+)_(.+\.mp3)$/);
-                  if (m) url = "/audio/" + m[1] + "/" + m[2];
+                  var m = url.match(/^\/audio\/(.+)\.mp3$/);
+                  if (m) {
+                    var sid = m[1];
+                    var sep = sid.indexOf("_");
+                    var fp =
+                      sep >= 0
+                        ? sid.slice(0, sep) + "/" + sid.slice(sep + 1)
+                        : sid;
+                    url = basePath + "audio/" + fp + ".mp3";
+                  }
                 }
                 return origFetch.call(this, url, opts);
               };
@@ -25902,8 +25943,25 @@ parsed = DiscoveryOutput.model_validate(response.tool_calls[0].arguments)`,
     <script>
       // Chapter persistence via URL hash — works on both local dev and GitHub Pages.
       // Restores the active chapter from #ch1-#ch8 in the URL after React mounts.
+      // Hides #root until the correct chapter is painted to prevent ch1 flash.
       (function () {
         var valid = ["ch1", "ch2", "ch3", "ch4", "ch5", "ch6", "ch7", "ch8"];
+        var hashCh = location.hash.replace("#", "");
+        var needsRestore = valid.indexOf(hashCh) >= 0 && hashCh !== "ch1";
+
+        // Hide immediately (before first paint) if we need to restore a chapter
+        if (needsRestore) {
+          var hideStyle = document.createElement("style");
+          hideStyle.id = "ch-restore-hide";
+          hideStyle.textContent = "#root{opacity:0}";
+          document.head.appendChild(hideStyle);
+        }
+
+        function reveal() {
+          var s = document.getElementById("ch-restore-hide");
+          if (s) s.remove();
+        }
+
         function restore() {
           var h = location.hash.replace("#", "");
           var idx = valid.indexOf(h);
@@ -25911,14 +25969,29 @@ parsed = DiscoveryOutput.model_validate(response.tool_calls[0].arguments)`,
           var btns = document.querySelectorAll("nav button");
           if (btns[idx]) btns[idx].click();
         }
-        // Restore on initial load (after React mounts)
+
         function init() {
-          if (!location.hash) return;
-          setTimeout(restore, 300);
+          syncHash();
+          if (!needsRestore) return;
+          restore();
+          // Wait for React to commit the active-state update to the nav.
+          // Scoped to just the nav element (~8 buttons) so this is very cheap.
+          var nav = document.querySelector("nav");
+          if (nav) {
+            var rmo = new MutationObserver(function () {
+              rmo.disconnect();
+              reveal();
+            });
+            rmo.observe(nav, {
+              subtree: true,
+              childList: true,
+              attributes: true,
+            });
+          } else {
+            reveal();
+          }
         }
-        if (document.readyState === "complete") init();
-        else window.addEventListener("load", init);
-        // Sync hash on nav clicks
+
         function syncHash() {
           var btns = document.querySelectorAll("nav button");
           btns.forEach(function (btn, i) {
@@ -25927,15 +26000,19 @@ parsed = DiscoveryOutput.model_validate(response.tool_calls[0].arguments)`,
             });
           });
         }
-        // Wait for React to render nav buttons
+
+        // Wait for React to render nav buttons, then restore
         var mo = new MutationObserver(function () {
           if (document.querySelectorAll("nav button").length >= 8) {
             mo.disconnect();
-            syncHash();
             init();
           }
         });
         mo.observe(document.body, { childList: true, subtree: true });
+
+        // Safety: never stay hidden longer than 1s
+        if (needsRestore) setTimeout(reveal, 1000);
+
         // Back/forward navigation
         window.addEventListener("hashchange", restore);
       })();
